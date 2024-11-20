@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: Product Recommendation Service API
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: nodejs18.x
+    MemorySize: 256
+    Environment:
+      Variables:
+        NODE_ENV: production
+
+Resources:
+  ProductRecommendationApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
+
+  GetSimilarProductsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/lambda/getSimilarProducts.handler
+      Events:
+        GetSimilar:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProductRecommendationApi
+            Path: /products/similar/{productId}
+            Method: GET
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+            Resource: '*'
+
+  CreateProductsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/lambda/createProducts.handler
+      Events:
+        CreateProducts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProductRecommendationApi
+            Path: /products
+            Method: POST
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+            Resource: '*'
+
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${ProductRecommendationApi}.execute-api.${AWS::Region}.amazonaws.com/prod/"
