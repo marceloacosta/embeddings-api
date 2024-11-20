@@ -1,43 +1,50 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { CreateProductDto } from '../dto/create-product.dto';
 import { BedrockService } from './bedrock.service';
-
-interface Product extends CreateProductDto {
-  embedding?: number[];
-}
+import { MockDbService } from './mock-db.service';
+import { Product, ProductResponse } from '../interfaces/product.interface';
 
 @Injectable()
 export class ProductsService {
-  private products: Map<string, Product> = new Map();
-
-  constructor(private readonly bedrockService: BedrockService) {}
+  constructor(
+    private readonly bedrockService: BedrockService,
+    private readonly dbService: MockDbService,
+  ) {}
 
   async createProducts(products: CreateProductDto[]): Promise<void> {
-    for (const product of products) {
-      const embedding = await this.bedrockService.generateProductEmbedding(product);
-      this.products.set(product.id, { ...product, embedding });
-    }
+    const productsWithEmbeddings: Product[] = await Promise.all(
+      products.map(async (product) => {
+        const embedding = await this.bedrockService.generateProductEmbedding(product);
+        return {
+          ...product,
+          embedding,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+      })
+    );
+
+    await this.dbService.batchPutProducts(productsWithEmbeddings);
   }
 
-  async findSimilarProducts(productId: string, limit: number = 5): Promise<Product[]> {
-    const product = this.products.get(productId);
+  async findSimilarProducts(productId: string, limit: number = 5): Promise<ProductResponse[]> {
+    const product = await this.dbService.getProduct(productId);
     if (!product || !product.embedding) {
       throw new NotFoundException(`Product with ID ${productId} not found`);
     }
 
-    const similarities = Array.from(this.products.values())
+    const allProducts = await this.dbService.getAllProducts();
+    
+    const similarities = allProducts
       .filter((p) => p.id !== productId)
       .map((p) => ({
-        product: p,
-        similarity: this.cosineSimilarity(product.embedding!, p.embedding!),
+        ...p,
+        similarityScore: this.cosineSimilarity(product.embedding!, p.embedding!),
       }))
-      .sort((a, b) => b.similarity - a.similarity)
+      .sort((a, b) => b.similarityScore! - a.similarityScore!)
       .slice(0, limit);
 
-    return similarities.map(({ product }) => {
-      const { embedding, ...productWithoutEmbedding } = product;
-      return productWithoutEmbedding;
-    });
+    return similarities.map(({ embedding, ...rest }) => rest);
   }
 
   private cosineSimilarity(a: number[], b: number[]): number {
